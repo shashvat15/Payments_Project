@@ -1,0 +1,95 @@
+version: '3.8'
+
+services:
+  # Database dedicated exclusively to Order Service
+  order-db:
+    image: postgres:16-alpine
+    container_name: payflow-order-db
+    environment:
+      POSTGRES_DB: order_db
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: password
+    ports:
+      - "5432:5432"
+    volumes:
+      - order_db_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres -d order_db"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+    networks:
+      - payflow-net
+
+  # Database dedicated exclusively to Payment Service (Strict Database-per-Service Isolation)
+  payment-db:
+    image: postgres:16-alpine
+    container_name: payflow-payment-db
+    environment:
+      POSTGRES_DB: payment_db
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: password
+    ports:
+      - "5433:5432" # Exposed on host 5433 to avoid port collision with order-db
+    volumes:
+      - payment_db_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres -d payment_db"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+    networks:
+      - payflow-net
+
+  # Payment Service Application
+  payment-service:
+    build:
+      context: ./payment-service
+      dockerfile: Dockerfile
+    container_name: payflow-payment-service
+    ports:
+      - "8082:8082"
+    environment:
+      SERVER_PORT: 8082
+      DB_HOST: payment-db
+      DB_PORT: 5432
+      DB_NAME: payment_db
+      DB_USERNAME: postgres
+      DB_PASSWORD: password
+    depends_on:
+      payment-db:
+        condition: service_healthy
+    networks:
+      - payflow-net
+
+  # Order Service Application
+  order-service:
+    build:
+      context: ./order-service
+      dockerfile: Dockerfile
+    container_name: payflow-order-service
+    ports:
+      - "8081:8081"
+    environment:
+      SERVER_PORT: 8081
+      DB_HOST: order-db
+      DB_PORT: 5432
+      DB_NAME: order_db
+      DB_USERNAME: postgres
+      DB_PASSWORD: password
+      PAYMENT_SERVICE_URL: http://payment-service:8082
+    depends_on:
+      order-db:
+        condition: service_healthy
+      payment-service:
+        condition: service_started
+    networks:
+      - payflow-net
+
+volumes:
+  order_db_data:
+  payment_db_data:
+
+networks:
+  payflow-net:
+    driver: bridge
