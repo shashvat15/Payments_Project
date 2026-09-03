@@ -1,0 +1,165 @@
+{
+	"info": {
+		"_postman_id": "a1b2c3d4-payflow-collection",
+		"name": "PayFlow - Distributed Payment System",
+		"description": "Collection of API requests to test the PayFlow Order and Payment Microservices.",
+		"schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
+	},
+	"item": [
+		{
+			"name": "1. Order Service (Port 8081)",
+			"item": [
+				{
+					"name": "Create Order - Success (Happy Path)",
+					"request": {
+						"method": "POST",
+						"header": [
+							{
+								"key": "Content-Type",
+								"value": "application/json"
+							}
+						],
+						"body": {
+							"mode": "raw",
+							"raw": "{\n  \"customerId\": 42,\n  \"amount\": 5000.00\n}"
+						},
+						"url": {
+							"raw": "http://localhost:8081/api/orders",
+							"protocol": "http",
+							"host": ["localhost"],
+							"port": "8081",
+							"path": ["api", "orders"]
+						}
+					}
+				},
+				{
+					"name": "Create Order - Simulate Payment Failure",
+					"request": {
+						"method": "POST",
+						"header": [
+							{
+								"key": "Content-Type",
+								"value": "application/json"
+							}
+						],
+						"body": {
+							"mode": "raw",
+							"raw": "{\n  \"customerId\": 42,\n  \"amount\": 5000.00,\n  \"simulatePaymentFailure\": true\n}"
+						},
+						"url": {
+							"raw": "http://localhost:8081/api/orders",
+							"protocol": "http",
+							"host": ["localhost"],
+							"port": "8081",
+							"path": ["api", "orders"]
+						}
+					}
+				},
+				{
+					"name": "Create Order - Simulate Dual-Write Failure",
+					"request": {
+						"method": "POST",
+						"header": [
+							{
+								"key": "Content-Type",
+								"value": "application/json"
+							}
+						],
+						"body": {
+							"mode": "raw",
+							"raw": "{\n  \"customerId\": 42,\n  \"amount\": 5000.00,\n  \"simulateOrderUpdateFailure\": true\n}"
+						},
+						"url": {
+							"raw": "http://localhost:8081/api/orders",
+							"protocol": "http",
+							"host": ["localhost"],
+							"port": "8081",
+							"path": ["api", "orders"]
+						}
+					}
+				},
+				{
+					"name": "Get Order By ID",
+					"request": {
+						"method": "GET",
+						"header": [],
+						"url": {
+							"raw": "http://localhost:8081/api/orders/1",
+							"protocol": "http",
+							"host": ["localhost"],
+							"port": "8081",
+							"path": ["api", "orders", "1"]
+						}
+					}
+				},
+				{
+					"name": "Get All Orders",
+					"request": {
+						"method": "GET",
+						"header": [],
+						"url": {
+							"raw": "http://localhost:8081/api/orders",
+							"protocol": "http",
+							"host": ["localhost"],
+							"port": "8081",
+							"path": ["api", "orders"]
+						}
+					}
+				},
+				{
+					"name": "Get Orders By Customer ID",
+					"request": {
+						"method": "GET",
+						"header": [],
+						"url": {
+							"raw": "http://localhost:8081/api/orders?customerId=42",
+							"protocol": "http",
+							"host": ["localhost"],
+							"port": "8081",
+							"path": ["api", "orders"],
+							"query": [
+								{
+									"key": "customerId",
+									"value": "42"
+								}
+							]
+						}
+					}
+				}
+			]
+		},
+		{
+			"name": "2. Payment Service (Port 8082)",
+			"item": [
+				{
+					"name": "Get Payment By ID",
+					"request": {
+						"method": "GET",
+						"header": [],
+						"url": {
+							"raw": "http://localhost:8082/api/payments/1",
+							"protocol": "http",
+							"host": ["localhost"],
+							"port": "8082",
+							"path": ["api", "payments", "1"]
+						}
+					}
+				},
+				{
+					"name": "Get Payments By Order ID",
+					"request": {
+						"method": "GET",
+						"header": [],
+						"url": {
+							"raw": "http://localhost:8082/api/payments/order/1",
+							"protocol": "http",
+							"host": ["localhost"],
+							"port": "8082",
+							"path": ["api", "payments", "order", "1"]
+						}
+					}
+				}
+			]
+		}
+	]
+}
