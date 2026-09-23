@@ -1,20 +1,20 @@
 package com.payflow.order.service;
 
-import com.payflow.order.client.PaymentClient;
 import com.payflow.order.dto.CreateOrderRequest;
 import com.payflow.order.dto.OrderResponse;
-import com.payflow.order.dto.PaymentRequestDto;
-import com.payflow.order.dto.PaymentResponseDto;
 import com.payflow.order.entity.Order;
 import com.payflow.order.entity.OrderStatus;
+import com.payflow.order.event.OrderCreatedEvent;
+import com.payflow.order.event.PaymentProcessedEvent;
 import com.payflow.order.exception.OrderProcessingException;
 import com.payflow.order.exception.ResourceNotFoundException;
-import com.payflow.order.exception.ServiceCommunicationException;
+import com.payflow.order.kafka.OrderEventProducer;
 import com.payflow.order.repository.OrderRepository;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
+import org.mockito.ArgumentCaptor;
 import org.mockito.InjectMocks;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
@@ -35,7 +35,7 @@ class OrderServiceTest {
     private OrderRepository orderRepository;
 
     @Mock
-    private PaymentClient paymentClient;
+    private OrderEventProducer orderEventProducer;
 
     @InjectMocks
     private OrderService orderService;
@@ -51,82 +51,69 @@ class OrderServiceTest {
     }
 
     @Test
-    @DisplayName("Should successfully create order and mark as PAID when payment succeeds")
+    @DisplayName("Should create order with PAYMENT_PENDING and emit OrderCreatedEvent to Kafka")
     void testCreateOrder_Success() {
         CreateOrderRequest request = new CreateOrderRequest(42L, new BigDecimal("5000.00"));
-        PaymentResponseDto paymentSuccess = new PaymentResponseDto(
-                101L, 1L, new BigDecimal("5000.00"), "SUCCESS",
-                LocalDateTime.now(), LocalDateTime.now()
-        );
-
-        Order paidOrder = new Order(42L, new BigDecimal("5000.00"), OrderStatus.PAID);
-        paidOrder.setId(1L);
-
-        when(orderRepository.save(any(Order.class))).thenReturn(pendingOrder, paidOrder);
-        when(orderRepository.findById(1L)).thenReturn(Optional.of(pendingOrder));
-        when(paymentClient.processPayment(any(PaymentRequestDto.class))).thenReturn(paymentSuccess);
+        when(orderRepository.save(any(Order.class))).thenReturn(pendingOrder);
 
         OrderResponse response = orderService.createOrder(request);
 
         assertNotNull(response);
         assertEquals(1L, response.getId());
         assertEquals(42L, response.getCustomerId());
-        assertEquals(OrderStatus.PAID, response.getStatus());
+        assertEquals(OrderStatus.PAYMENT_PENDING, response.getStatus());
 
-        verify(orderRepository, times(2)).save(any(Order.class));
-        verify(paymentClient).processPayment(any(PaymentRequestDto.class));
+        ArgumentCaptor<OrderCreatedEvent> eventCaptor = ArgumentCaptor.forClass(OrderCreatedEvent.class);
+        verify(orderEventProducer).sendOrderCreatedEvent(eventCaptor.capture());
+        assertEquals(1L, eventCaptor.getValue().getOrderId());
+        assertEquals(new BigDecimal("5000.00"), eventCaptor.getValue().getAmount());
     }
 
     @Test
-    @DisplayName("Should mark order as PAYMENT_FAILED when payment is rejected")
-    void testCreateOrder_PaymentFailed() {
-        CreateOrderRequest request = new CreateOrderRequest(42L, new BigDecimal("5000.00"), true, false);
-        PaymentResponseDto paymentFailed = new PaymentResponseDto(
-                102L, 1L, new BigDecimal("5000.00"), "FAILED",
-                LocalDateTime.now(), LocalDateTime.now()
+    @DisplayName("Should throw OrderProcessingException when simulated Kafka publish failure is triggered")
+    void testCreateOrder_SimulateKafkaPublishFailure() {
+        CreateOrderRequest request = new CreateOrderRequest(42L, new BigDecimal("5000.00"), false, false, true);
+        when(orderRepository.save(any(Order.class))).thenReturn(pendingOrder);
+
+        assertThrows(OrderProcessingException.class, () -> orderService.createOrder(request));
+        verify(orderEventProducer, never()).sendOrderCreatedEvent(any());
+    }
+
+    @Test
+    @DisplayName("Should transition order to PAID when PaymentProcessedEvent status is SUCCESS")
+    void testHandlePaymentProcessedEvent_Success() {
+        PaymentProcessedEvent event = new PaymentProcessedEvent(
+                "evt-123", 1L, 101L, new BigDecimal("5000.00"), "SUCCESS", LocalDateTime.now()
+        );
+
+        Order paidOrder = new Order(42L, new BigDecimal("5000.00"), OrderStatus.PAID);
+        paidOrder.setId(1L);
+
+        when(orderRepository.findById(1L)).thenReturn(Optional.of(pendingOrder));
+        when(orderRepository.save(any(Order.class))).thenReturn(paidOrder);
+
+        Order result = orderService.handlePaymentProcessedEvent(event);
+
+        assertEquals(OrderStatus.PAID, result.getStatus());
+        verify(orderRepository).save(pendingOrder);
+    }
+
+    @Test
+    @DisplayName("Should transition order to PAYMENT_FAILED when PaymentProcessedEvent status is FAILED")
+    void testHandlePaymentProcessedEvent_Failed() {
+        PaymentProcessedEvent event = new PaymentProcessedEvent(
+                "evt-124", 1L, 102L, new BigDecimal("5000.00"), "FAILED", LocalDateTime.now()
         );
 
         Order failedOrder = new Order(42L, new BigDecimal("5000.00"), OrderStatus.PAYMENT_FAILED);
         failedOrder.setId(1L);
 
-        when(orderRepository.save(any(Order.class))).thenReturn(pendingOrder, failedOrder);
         when(orderRepository.findById(1L)).thenReturn(Optional.of(pendingOrder));
-        when(paymentClient.processPayment(any(PaymentRequestDto.class))).thenReturn(paymentFailed);
+        when(orderRepository.save(any(Order.class))).thenReturn(failedOrder);
 
-        OrderResponse response = orderService.createOrder(request);
+        Order result = orderService.handlePaymentProcessedEvent(event);
 
-        assertNotNull(response);
-        assertEquals(OrderStatus.PAYMENT_FAILED, response.getStatus());
-        verify(paymentClient).processPayment(any(PaymentRequestDto.class));
-    }
-
-    @Test
-    @DisplayName("Should mark order as PAYMENT_FAILED and throw ServiceCommunicationException when Payment Service is down")
-    void testCreateOrder_ServiceUnavailable() {
-        CreateOrderRequest request = new CreateOrderRequest(42L, new BigDecimal("5000.00"));
-
-        when(orderRepository.save(any(Order.class))).thenReturn(pendingOrder);
-        when(orderRepository.findById(1L)).thenReturn(Optional.of(pendingOrder));
-        when(paymentClient.processPayment(any(PaymentRequestDto.class)))
-                .thenThrow(new ServiceCommunicationException("Connection refused"));
-
-        assertThrows(ServiceCommunicationException.class, () -> orderService.createOrder(request));
-        assertEquals(OrderStatus.PAYMENT_FAILED, pendingOrder.getStatus());
-    }
-
-    @Test
-    @DisplayName("Should throw OrderProcessingException when simulated order update failure occurs after payment succeeds")
-    void testCreateOrder_SimulateOrderUpdateFailure() {
-        CreateOrderRequest request = new CreateOrderRequest(42L, new BigDecimal("5000.00"), false, true);
-        PaymentResponseDto paymentSuccess = new PaymentResponseDto(
-                103L, 1L, new BigDecimal("5000.00"), "SUCCESS",
-                LocalDateTime.now(), LocalDateTime.now()
-        );
-
-        when(orderRepository.save(any(Order.class))).thenReturn(pendingOrder);
-        when(paymentClient.processPayment(any(PaymentRequestDto.class))).thenReturn(paymentSuccess);
-
-        assertThrows(OrderProcessingException.class, () -> orderService.createOrder(request));
+        assertEquals(OrderStatus.PAYMENT_FAILED, result.getStatus());
     }
 
     @Test

@@ -17,6 +17,7 @@ public class CreateOrderRequest {
     // Simulation flags for demonstrating distributed failure modes
     private Boolean simulatePaymentFailure = false;
     private Boolean simulateOrderUpdateFailure = false;
+    private Boolean simulateKafkaPublishFailure = false;
 
     public CreateOrderRequest() {
     }
@@ -26,6 +27,15 @@ public class CreateOrderRequest {
         this.amount = amount;
         this.simulatePaymentFailure = false;
         this.simulateOrderUpdateFailure = false;
+        this.simulateKafkaPublishFailure = false;
+    }
+
+    public CreateOrderRequest(Long customerId, BigDecimal amount, Boolean simulatePaymentFailure) {
+        this.customerId = customerId;
+        this.amount = amount;
+        this.simulatePaymentFailure = simulatePaymentFailure != null && simulatePaymentFailure;
+        this.simulateOrderUpdateFailure = false;
+        this.simulateKafkaPublishFailure = false;
     }
 
     public CreateOrderRequest(Long customerId, BigDecimal amount, Boolean simulatePaymentFailure, Boolean simulateOrderUpdateFailure) {
@@ -33,6 +43,15 @@ public class CreateOrderRequest {
         this.amount = amount;
         this.simulatePaymentFailure = simulatePaymentFailure != null && simulatePaymentFailure;
         this.simulateOrderUpdateFailure = simulateOrderUpdateFailure != null && simulateOrderUpdateFailure;
+        this.simulateKafkaPublishFailure = false;
+    }
+
+    public CreateOrderRequest(Long customerId, BigDecimal amount, Boolean simulatePaymentFailure, Boolean simulateOrderUpdateFailure, Boolean simulateKafkaPublishFailure) {
+        this.customerId = customerId;
+        this.amount = amount;
+        this.simulatePaymentFailure = simulatePaymentFailure != null && simulatePaymentFailure;
+        this.simulateOrderUpdateFailure = simulateOrderUpdateFailure != null && simulateOrderUpdateFailure;
+        this.simulateKafkaPublishFailure = simulateKafkaPublishFailure != null && simulateKafkaPublishFailure;
     }
 
     public Long getCustomerId() {
@@ -65,5 +84,13 @@ public class CreateOrderRequest {
 
     public void setSimulateOrderUpdateFailure(Boolean simulateOrderUpdateFailure) {
         this.simulateOrderUpdateFailure = simulateOrderUpdateFailure;
+    }
+
+    public Boolean getSimulateKafkaPublishFailure() {
+        return simulateKafkaPublishFailure;
+    }
+
+    public void setSimulateKafkaPublishFailure(Boolean simulateKafkaPublishFailure) {
+        this.simulateKafkaPublishFailure = simulateKafkaPublishFailure;
     }
 }

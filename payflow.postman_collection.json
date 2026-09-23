@@ -1,8 +1,8 @@
 {
 	"info": {
-		"_postman_id": "a1b2c3d4-payflow-collection",
-		"name": "PayFlow - Distributed Payment System",
-		"description": "Collection of API requests to test the PayFlow Order and Payment Microservices.",
+		"_postman_id": "a1b2c3d4-payflow-phase2-kafka",
+		"name": "PayFlow - Distributed Payment System (Phase 2A - Kafka)",
+		"description": "API collection for testing PayFlow with Apache Kafka asynchronous event-driven architecture.",
 		"schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
 	},
 	"item": [
@@ -10,7 +10,7 @@
 			"name": "1. Order Service (Port 8081)",
 			"item": [
 				{
-					"name": "Create Order - Success (Happy Path)",
+					"name": "Create Order - Asynchronous Happy Path",
 					"request": {
 						"method": "POST",
 						"header": [
@@ -29,11 +29,12 @@
 							"host": ["localhost"],
 							"port": "8081",
 							"path": ["api", "orders"]
-						}
+						},
+						"description": "Returns immediately with status PAYMENT_PENDING. Emits OrderCreatedEvent to Kafka. Payment Service processes in background, emits PaymentProcessedEvent, and Order Service updates to PAID."
 					}
 				},
 				{
-					"name": "Create Order - Simulate Payment Failure",
+					"name": "Create Order - Simulate Payment Failure (Kafka)",
 					"request": {
 						"method": "POST",
 						"header": [
@@ -52,11 +53,12 @@
 							"host": ["localhost"],
 							"port": "8081",
 							"path": ["api", "orders"]
-						}
+						},
+						"description": "Emits OrderCreatedEvent with simulatePaymentFailure=true. Payment Service marks payment FAILED and Order Service updates order to PAYMENT_FAILED."
 					}
 				},
 				{
-					"name": "Create Order - Simulate Dual-Write Failure",
+					"name": "Create Order - Simulate Dual-Write Failure (DB write vs Kafka publish)",
 					"request": {
 						"method": "POST",
 						"header": [
@@ -67,7 +69,7 @@
 						],
 						"body": {
 							"mode": "raw",
-							"raw": "{\n  \"customerId\": 42,\n  \"amount\": 5000.00,\n  \"simulateOrderUpdateFailure\": true\n}"
+							"raw": "{\n  \"customerId\": 42,\n  \"amount\": 5000.00,\n  \"simulateKafkaPublishFailure\": true\n}"
 						},
 						"url": {
 							"raw": "http://localhost:8081/api/orders",
@@ -75,7 +77,8 @@
 							"host": ["localhost"],
 							"port": "8081",
 							"path": ["api", "orders"]
-						}
+						},
+						"description": "Demonstrates the Dual-Write Problem: Order is committed to order_db with PAYMENT_PENDING, but Kafka publish fails. The order is stuck forever, proving the need for Transactional Outbox."
 					}
 				},
 				{
@@ -89,7 +92,8 @@
 							"host": ["localhost"],
 							"port": "8081",
 							"path": ["api", "orders", "1"]
-						}
+						},
+						"description": "Fetches order state. In async flow, polling this endpoint shows status transitioning from PAYMENT_PENDING to PAID."
 					}
 				},
 				{
@@ -156,7 +160,8 @@
 							"host": ["localhost"],
 							"port": "8082",
 							"path": ["api", "payments", "order", "1"]
-						}
+						},
+						"description": "Verifies that Payment Service created a Payment record asynchronously after receiving OrderCreatedEvent."
 					}
 				}
 			]

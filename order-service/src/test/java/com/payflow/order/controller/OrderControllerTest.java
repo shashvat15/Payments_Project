@@ -37,11 +37,11 @@ class OrderControllerTest {
     private OrderService orderService;
 
     @Test
-    @DisplayName("POST /api/orders should return 201 with OrderResponse")
+    @DisplayName("POST /api/orders should return 201 with OrderResponse in PAYMENT_PENDING state")
     void testCreateOrder_Success() throws Exception {
         CreateOrderRequest request = new CreateOrderRequest(42L, new BigDecimal("5000.00"));
         OrderResponse response = new OrderResponse(
-                1L, 42L, new BigDecimal("5000.00"), OrderStatus.PAID,
+                1L, 42L, new BigDecimal("5000.00"), OrderStatus.PAYMENT_PENDING,
                 LocalDateTime.now(), LocalDateTime.now()
         );
 
@@ -54,7 +54,7 @@ class OrderControllerTest {
                 .andExpect(jsonPath("$.id").value(1))
                 .andExpect(jsonPath("$.customerId").value(42))
                 .andExpect(jsonPath("$.amount").value(5000.00))
-                .andExpect(jsonPath("$.status").value("PAID"));
+                .andExpect(jsonPath("$.status").value("PAYMENT_PENDING"));
     }
 
     @Test

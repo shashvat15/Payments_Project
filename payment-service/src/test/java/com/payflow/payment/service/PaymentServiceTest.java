@@ -4,6 +4,8 @@ import com.payflow.payment.dto.PaymentResponse;
 import com.payflow.payment.dto.ProcessPaymentRequest;
 import com.payflow.payment.entity.Payment;
 import com.payflow.payment.entity.PaymentStatus;
+import com.payflow.payment.event.OrderCreatedEvent;
+import com.payflow.payment.event.PaymentProcessedEvent;
 import com.payflow.payment.exception.ResourceNotFoundException;
 import com.payflow.payment.repository.PaymentRepository;
 import org.junit.jupiter.api.BeforeEach;
@@ -44,7 +46,43 @@ class PaymentServiceTest {
     }
 
     @Test
-    @DisplayName("Should process payment successfully by default")
+    @DisplayName("Should process payment successfully from Kafka OrderCreatedEvent")
+    void testProcessPaymentFromEvent_Success() {
+        OrderCreatedEvent event = new OrderCreatedEvent("evt-001", 101L, 42L, new BigDecimal("5000.00"), false, LocalDateTime.now());
+        when(paymentRepository.save(any(Payment.class))).thenReturn(samplePayment);
+
+        PaymentProcessedEvent result = paymentService.processPaymentFromEvent(event);
+
+        assertNotNull(result);
+        assertEquals(101L, result.getOrderId());
+        assertEquals(1L, result.getPaymentId());
+        assertEquals("SUCCESS", result.getStatus());
+
+        ArgumentCaptor<Payment> captor = ArgumentCaptor.forClass(Payment.class);
+        verify(paymentRepository).save(captor.capture());
+        assertEquals(PaymentStatus.SUCCESS, captor.getValue().getStatus());
+        assertEquals(101L, captor.getValue().getOrderId());
+    }
+
+    @Test
+    @DisplayName("Should record FAILED payment from Kafka OrderCreatedEvent when simulatePaymentFailure is true")
+    void testProcessPaymentFromEvent_SimulatedFailure() {
+        OrderCreatedEvent event = new OrderCreatedEvent("evt-002", 101L, 42L, new BigDecimal("5000.00"), true, LocalDateTime.now());
+        Payment failedPayment = new Payment(101L, new BigDecimal("5000.00"), PaymentStatus.FAILED);
+        failedPayment.setId(2L);
+        failedPayment.setCreatedAt(LocalDateTime.now());
+
+        when(paymentRepository.save(any(Payment.class))).thenReturn(failedPayment);
+
+        PaymentProcessedEvent result = paymentService.processPaymentFromEvent(event);
+
+        assertNotNull(result);
+        assertEquals("FAILED", result.getStatus());
+        assertEquals(2L, result.getPaymentId());
+    }
+
+    @Test
+    @DisplayName("Should process payment successfully via REST")
     void testProcessPayment_Success() {
         ProcessPaymentRequest request = new ProcessPaymentRequest(101L, new BigDecimal("5000.00"), false);
         when(paymentRepository.save(any(Payment.class))).thenReturn(samplePayment);
@@ -56,32 +94,6 @@ class PaymentServiceTest {
         assertEquals(101L, response.getOrderId());
         assertEquals(new BigDecimal("5000.00"), response.getAmount());
         assertEquals(PaymentStatus.SUCCESS, response.getStatus());
-
-        ArgumentCaptor<Payment> captor = ArgumentCaptor.forClass(Payment.class);
-        verify(paymentRepository).save(captor.capture());
-        assertEquals(PaymentStatus.SUCCESS, captor.getValue().getStatus());
-        assertEquals(101L, captor.getValue().getOrderId());
-    }
-
-    @Test
-    @DisplayName("Should record FAILED payment when simulateFailure is true")
-    void testProcessPayment_SimulatedFailure() {
-        ProcessPaymentRequest request = new ProcessPaymentRequest(101L, new BigDecimal("5000.00"), true);
-        Payment failedPayment = new Payment(101L, new BigDecimal("5000.00"), PaymentStatus.FAILED);
-        failedPayment.setId(2L);
-        failedPayment.setCreatedAt(LocalDateTime.now());
-
-        when(paymentRepository.save(any(Payment.class))).thenReturn(failedPayment);
-
-        PaymentResponse response = paymentService.processPayment(request);
-
-        assertNotNull(response);
-        assertEquals(2L, response.getId());
-        assertEquals(PaymentStatus.FAILED, response.getStatus());
-
-        ArgumentCaptor<Payment> captor = ArgumentCaptor.forClass(Payment.class);
-        verify(paymentRepository).save(captor.capture());
-        assertEquals(PaymentStatus.FAILED, captor.getValue().getStatus());
     }
 
     @Test

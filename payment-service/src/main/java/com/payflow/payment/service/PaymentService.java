@@ -4,6 +4,8 @@ import com.payflow.payment.dto.PaymentResponse;
 import com.payflow.payment.dto.ProcessPaymentRequest;
 import com.payflow.payment.entity.Payment;
 import com.payflow.payment.entity.PaymentStatus;
+import com.payflow.payment.event.OrderCreatedEvent;
+import com.payflow.payment.event.PaymentProcessedEvent;
 import com.payflow.payment.exception.ResourceNotFoundException;
 import com.payflow.payment.repository.PaymentRepository;
 import org.slf4j.Logger;
@@ -25,12 +27,41 @@ public class PaymentService {
         this.paymentRepository = paymentRepository;
     }
 
+    /**
+     * Processes payment triggered asynchronously via Kafka OrderCreatedEvent.
+     * Persists payment in payment_db and returns PaymentProcessedEvent to be published back to Kafka.
+     */
+    @Transactional
+    public PaymentProcessedEvent processPaymentFromEvent(OrderCreatedEvent event) {
+        log.info("Processing payment from Kafka event for orderId: {}, amount: {}, simulateFailure: {}",
+                event.getOrderId(), event.getAmount(), event.getSimulatePaymentFailure());
+
+        PaymentStatus status = Boolean.TRUE.equals(event.getSimulatePaymentFailure())
+                ? PaymentStatus.FAILED
+                : PaymentStatus.SUCCESS;
+
+        Payment payment = new Payment(
+                event.getOrderId(),
+                event.getAmount(),
+                status
+        );
+
+        Payment savedPayment = paymentRepository.save(payment);
+        log.info("Payment saved in payment_db with id: {}, status: {}", savedPayment.getId(), savedPayment.getStatus());
+
+        return new PaymentProcessedEvent(
+                savedPayment.getOrderId(),
+                savedPayment.getId(),
+                savedPayment.getAmount(),
+                savedPayment.getStatus().name()
+        );
+    }
+
     @Transactional
     public PaymentResponse processPayment(ProcessPaymentRequest request) {
         log.info("Processing payment for orderId: {}, amount: {}, simulateFailure: {}",
                 request.getOrderId(), request.getAmount(), request.getSimulateFailure());
 
-        // Determine simulated payment outcome
         PaymentStatus initialStatus = Boolean.TRUE.equals(request.getSimulateFailure())
                 ? PaymentStatus.FAILED
                 : PaymentStatus.SUCCESS;

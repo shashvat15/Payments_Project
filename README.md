@@ -4,135 +4,93 @@ PayFlow is a backend learning project designed to teach and demonstrate distribu
 
 ---
 
-## Current Status: Phase 1 (Basic Synchronous Backend)
+## Current Status: Phase 2A (Kafka & Asynchronous Event-Driven Architecture)
 
-In Phase 1, we implement a synchronous 2-service architecture to understand why distributed patterns (Kafka, Saga, Outbox, Resilience4j) are needed.
+In **Phase 2A**, we replaced synchronous REST communication with **Apache Kafka event streams** to achieve non-blocking execution, high throughput, and temporal decoupling.
 
-Detailed conceptual documentation: 👉 [`docs/phase-1.md`](docs/phase-1.md)
+- Detailed Phase 1 documentation: 👉 [`docs/phase-1.md`](docs/phase-1.md)
+- Detailed Phase 2A documentation: 👉 [`docs/phase-2-kafka.md`](docs/phase-2-kafka.md)
 
 ---
 
-## System Architecture
+## System Architecture (Phase 2A)
 
 ```
 Client
   |
-  | 1. POST /api/orders
+  | 1. POST /api/orders (Returns immediately: PAYMENT_PENDING)
   v
 +-----------------------+                    +-------------------------+
-|     order-service     | --- HTTP REST ---> |     payment-service     |
+|     order-service     |                    |     payment-service     |
 |      (Port: 8081)     |                    |       (Port: 8082)      |
 +-----------------------+                    +-------------------------+
-            |                                             |
-            v                                             v
-+-----------------------+                    +-------------------------+
-|        order_db       |                    |        payment_db       |
-|      (PostgreSQL)     |                    |       (PostgreSQL)      |
-+-----------------------+                    +-------------------------+
+       |         |                                      ^         |
+       |         | 2. OrderCreatedEvent                 |         |
+       v         +------------------> [ Kafka ] --------+         |
+  +----------+                        [ Topic ]                   |
+  | order_db |                     'order-created'                |
+  +----------+                                                    |
+       ^                                                          |
+       | 4. Update Order (PAID)       [ Kafka ]                   v
+       +----------------------------- [ Topic ] <-----------------+
+                                 'payment-processed'  3. PaymentProcessedEvent
+                                                                  |
+                                                                  v
+                                                            +------------+
+                                                            | payment_db |
+                                                            +------------+
 ```
 
-### Key Architectural Constraints
-1. **Database-per-Service**: `order-service` connects strictly to `order_db`; `payment-service` connects strictly to `payment_db`.
-2. **Synchronous REST**: Services communicate over HTTP.
-3. **No Distributed Transactions**: Demonstrates dual-write inconsistency and partial failure problems.
+### Kafka Topics & Consumer Groups
+- **`order-created`**: Emitted by `order-service` -> Consumed by `payment-service` (`group-id: payment-service-group`).
+- **`payment-processed`**: Emitted by `payment-service` -> Consumed by `order-service` (`group-id: order-service-group`).
 
 ---
 
-## Quick Start with Docker
+## Quick Start with Docker Compose
 
-To build and run both databases and both services simultaneously:
+To build and run all databases, Kafka, and both microservices:
 
 ```bash
 docker-compose up --build
 ```
 
-Services will be accessible at:
+### Services & Ports:
 - **Order Service**: `http://localhost:8081`
 - **Payment Service**: `http://localhost:8082`
+- **Apache Kafka (KRaft)**: `localhost:9092`
 - **Order DB (PostgreSQL)**: `localhost:5432` (`order_db`)
 - **Payment DB (PostgreSQL)**: `localhost:5433` (`payment_db`)
 
 ---
 
-## Running Locally with Maven
+## API Testing with Postman / cURL
 
-### 1. Start PostgreSQL Databases
-Create two databases:
-```sql
-CREATE DATABASE order_db;
-CREATE DATABASE payment_db;
-```
+Import [`payflow.postman_collection.json`](payflow.postman_collection.json) or run cURL:
 
-### 2. Run Payment Service
-```bash
-cd payment-service
-mvn spring-boot:run
-```
-
-### 3. Run Order Service
-```bash
-cd order-service
-mvn spring-boot:run
-```
-
----
-
-## API Testing & Failure Simulation
-
-### 1. Create Order (Happy Path - Success)
+### 1. Create Order (Asynchronous Happy Path)
 ```bash
 curl -X POST http://localhost:8081/api/orders \
   -H "Content-Type: application/json" \
-  -d '{
-    "customerId": 42,
-    "amount": 5000.00
-  }'
+  -d '{"customerId": 42, "amount": 5000.00}'
 ```
-Response:
-```json
-{
-  "id": 1,
-  "customerId": 42,
-  "amount": 5000.00,
-  "status": "PAID"
-}
-```
+- Returns immediately (`~15ms`): Status is `PAYMENT_PENDING`.
+- Within `~1-2s`: Query `GET http://localhost:8081/api/orders/1` -> Status is `PAID`.
+- Check Payment: Query `GET http://localhost:8082/api/payments/order/1` -> Status is `SUCCESS`.
 
-### 2. Simulate Payment Failure (Business Rejection)
+### 2. Simulate Payment Failure via Kafka
 ```bash
 curl -X POST http://localhost:8081/api/orders \
   -H "Content-Type: application/json" \
-  -d '{
-    "customerId": 42,
-    "amount": 5000.00,
-    "simulatePaymentFailure": true
-  }'
+  -d '{"customerId": 42, "amount": 5000.00, "simulatePaymentFailure": true}'
 ```
-Response:
-```json
-{
-  "id": 2,
-  "customerId": 42,
-  "amount": 5000.00,
-  "status": "PAYMENT_FAILED"
-}
-```
+- Query `GET http://localhost:8081/api/orders/2` -> Status is `PAYMENT_FAILED`.
 
-### 3. Simulate Downstream Service Down
-Stop `payment-service` and send an order creation request.
-`order-service` returns `503 Service Unavailable` with clean error details.
-
-### 4. Simulate Dual-Write Consistency Failure (The Core Distributed Problem)
+### 3. Observe the Dual-Write Problem (Motivation for Phase 3)
 ```bash
 curl -X POST http://localhost:8081/api/orders \
   -H "Content-Type: application/json" \
-  -d '{
-    "customerId": 42,
-    "amount": 5000.00,
-    "simulateOrderUpdateFailure": true
-  }'
+  -d '{"customerId": 42, "amount": 5000.00, "simulateKafkaPublishFailure": true}'
 ```
-- Payment #3 is marked `SUCCESS` in `payment_db`.
-- Order #3 is left in `PAYMENT_PENDING` in `order_db`.
-- User gets `500 Internal Server Error`.
-- **Learning Observation:** Money was captured, but the order was never marked as paid. This demonstrates the fundamental problem that Phase 2 will solve using the **Saga Pattern** and **Transactional Outbox**.
+- Order is saved in `order_db` as `PAYMENT_PENDING`, but the Kafka publish fails.
+- The order is stuck forever with no payment processed, proving why the **Transactional Outbox Pattern** is needed in Phase 3.
