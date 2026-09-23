@@ -5,10 +5,14 @@ import com.payflow.payment.event.PaymentProcessedEvent;
 import com.payflow.payment.service.PaymentService;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
-import org.springframework.kafka.annotation.KafkaListener;
-import org.springframework.stereotype.Component;
 
-@Component
+/**
+ * Phase 2A Choreography Consumer (Deprecated in Phase 2B).
+ * In Phase 2B Orchestration, PaymentService no longer listens directly to 'order-created'.
+ * Instead, the Saga Orchestrator dispatches 'ProcessPaymentCommand' to 'payment-command',
+ * which is consumed by PaymentCommandConsumer.
+ */
+@Deprecated
 public class OrderEventConsumer {
 
     private static final Logger log = LoggerFactory.getLogger(OrderEventConsumer.class);
@@ -21,22 +25,9 @@ public class OrderEventConsumer {
         this.paymentEventProducer = paymentEventProducer;
     }
 
-    @KafkaListener(
-            topics = "${app.kafka.topics.order-created:order-created}",
-            groupId = "${spring.kafka.consumer.group-id:payment-service-group}"
-    )
     public void consumeOrderCreatedEvent(OrderCreatedEvent event) {
-        log.info("Received OrderCreatedEvent from Kafka: eventId={}, orderId={}, customerId={}, amount={}, simulatePaymentFailure={}",
-                event.getEventId(), event.getOrderId(), event.getCustomerId(), event.getAmount(), event.getSimulatePaymentFailure());
-
-        try {
-            PaymentProcessedEvent processedEvent = paymentService.processPaymentFromEvent(event);
-            paymentEventProducer.sendPaymentProcessedEvent(processedEvent);
-            log.info("Successfully processed payment and published PaymentProcessedEvent for orderId={}", event.getOrderId());
-        } catch (Exception ex) {
-            log.error("Failed to process payment from OrderCreatedEvent for orderId={}: {}",
-                    event.getOrderId(), ex.getMessage(), ex);
-            throw ex;
-        }
+        log.info("[Deprecated Phase 2A] Received OrderCreatedEvent: eventId={}, orderId={}", event.getEventId(), event.getOrderId());
+        PaymentProcessedEvent processedEvent = paymentService.processPaymentFromEvent(event);
+        paymentEventProducer.sendPaymentProcessedEvent(processedEvent);
     }
 }

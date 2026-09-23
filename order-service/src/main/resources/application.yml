@@ -39,7 +39,7 @@ app:
   kafka:
     topics:
       order-created: order-created
-      payment-processed: payment-processed
+      order-command: order-command
 
 logging:
   level:

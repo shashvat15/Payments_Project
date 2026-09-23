@@ -1,8 +1,8 @@
 {
 	"info": {
-		"_postman_id": "a1b2c3d4-payflow-phase2-kafka",
-		"name": "PayFlow - Distributed Payment System (Phase 2A - Kafka)",
-		"description": "API collection for testing PayFlow with Apache Kafka asynchronous event-driven architecture.",
+		"_postman_id": "a1b2c3d4-payflow-phase2b-saga",
+		"name": "PayFlow - Distributed Payment System (Phase 2B - Saga Orchestration)",
+		"description": "API collection for testing PayFlow Saga Orchestration across Order, Inventory, Payment, and Saga Orchestrator services.",
 		"schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
 	},
 	"item": [
@@ -10,7 +10,7 @@
 			"name": "1. Order Service (Port 8081)",
 			"item": [
 				{
-					"name": "Create Order - Asynchronous Happy Path",
+					"name": "1. Create Order - Happy Path (Saga Success)",
 					"request": {
 						"method": "POST",
 						"header": [
@@ -21,7 +21,7 @@
 						],
 						"body": {
 							"mode": "raw",
-							"raw": "{\n  \"customerId\": 42,\n  \"amount\": 5000.00\n}"
+							"raw": "{\n  \"customerId\": 42,\n  \"amount\": 5000.00,\n  \"productId\": 1001,\n  \"quantity\": 1\n}"
 						},
 						"url": {
 							"raw": "http://localhost:8081/api/orders",
@@ -30,11 +30,11 @@
 							"port": "8081",
 							"path": ["api", "orders"]
 						},
-						"description": "Returns immediately with status PAYMENT_PENDING. Emits OrderCreatedEvent to Kafka. Payment Service processes in background, emits PaymentProcessedEvent, and Order Service updates to PAID."
+						"description": "Happy Path: Order created -> Saga Orchestrator reserves inventory in inventory-service -> processes payment in payment-service -> confirms order in order-service. Status transitions from PAYMENT_PENDING to PAID."
 					}
 				},
 				{
-					"name": "Create Order - Simulate Payment Failure (Kafka)",
+					"name": "2. Create Order - Simulate Payment Failure & Inventory Compensation",
 					"request": {
 						"method": "POST",
 						"header": [
@@ -45,7 +45,7 @@
 						],
 						"body": {
 							"mode": "raw",
-							"raw": "{\n  \"customerId\": 42,\n  \"amount\": 5000.00,\n  \"simulatePaymentFailure\": true\n}"
+							"raw": "{\n  \"customerId\": 42,\n  \"amount\": 5000.00,\n  \"productId\": 1001,\n  \"quantity\": 1,\n  \"simulatePaymentFailure\": true\n}"
 						},
 						"url": {
 							"raw": "http://localhost:8081/api/orders",
@@ -54,11 +54,35 @@
 							"port": "8081",
 							"path": ["api", "orders"]
 						},
-						"description": "Emits OrderCreatedEvent with simulatePaymentFailure=true. Payment Service marks payment FAILED and Order Service updates order to PAYMENT_FAILED."
+						"description": "Compensation Path: Inventory is reserved -> Payment fails -> Saga Orchestrator executes COMPENSATION by issuing ReleaseInventory to inventory-service -> cancels order in order-service (status CANCELLED)."
 					}
 				},
 				{
-					"name": "Create Order - Simulate Dual-Write Failure (DB write vs Kafka publish)",
+					"name": "3. Create Order - Simulate Inventory Reservation Failure",
+					"request": {
+						"method": "POST",
+						"header": [
+							{
+								"key": "Content-Type",
+								"value": "application/json"
+							}
+						],
+						"body": {
+							"mode": "raw",
+							"raw": "{\n  \"customerId\": 42,\n  \"amount\": 5000.00,\n  \"productId\": 1002,\n  \"quantity\": 1\n}"
+						},
+						"url": {
+							"raw": "http://localhost:8081/api/orders",
+							"protocol": "http",
+							"host": ["localhost"],
+							"port": "8081",
+							"path": ["api", "orders"]
+						},
+						"description": "Product 1002 has 0 available units. Inventory reservation fails immediately -> Saga Orchestrator cancels order without needing compensation."
+					}
+				},
+				{
+					"name": "4. Create Order - Simulate Dual-Write Failure",
 					"request": {
 						"method": "POST",
 						"header": [
@@ -78,7 +102,7 @@
 							"port": "8081",
 							"path": ["api", "orders"]
 						},
-						"description": "Demonstrates the Dual-Write Problem: Order is committed to order_db with PAYMENT_PENDING, but Kafka publish fails. The order is stuck forever, proving the need for Transactional Outbox."
+						"description": "Demonstrates the Dual-Write Problem: Order is committed to order_db, but Kafka event publishing fails."
 					}
 				},
 				{
@@ -92,8 +116,7 @@
 							"host": ["localhost"],
 							"port": "8081",
 							"path": ["api", "orders", "1"]
-						},
-						"description": "Fetches order state. In async flow, polling this endpoint shows status transitioning from PAYMENT_PENDING to PAID."
+						}
 					}
 				},
 				{
@@ -109,31 +132,59 @@
 							"path": ["api", "orders"]
 						}
 					}
-				},
+				}
+			]
+		},
+		{
+			"name": "2. Inventory Service (Port 8083)",
+			"item": [
 				{
-					"name": "Get Orders By Customer ID",
+					"name": "Get Inventory - Product 1001",
 					"request": {
 						"method": "GET",
 						"header": [],
 						"url": {
-							"raw": "http://localhost:8081/api/orders?customerId=42",
+							"raw": "http://localhost:8083/api/inventory/1001",
 							"protocol": "http",
 							"host": ["localhost"],
-							"port": "8081",
-							"path": ["api", "orders"],
-							"query": [
-								{
-									"key": "customerId",
-									"value": "42"
-								}
-							]
+							"port": "8083",
+							"path": ["api", "inventory", "1001"]
+						},
+						"description": "Check available and reserved quantities for Product 1001. When orders succeed or compensate, observe available/reserved quantities changing."
+					}
+				},
+				{
+					"name": "Get Inventory - Product 1002 (Out of stock)",
+					"request": {
+						"method": "GET",
+						"header": [],
+						"url": {
+							"raw": "http://localhost:8083/api/inventory/1002",
+							"protocol": "http",
+							"host": ["localhost"],
+							"port": "8083",
+							"path": ["api", "inventory", "1002"]
+						}
+					}
+				},
+				{
+					"name": "Get All Inventory Items",
+					"request": {
+						"method": "GET",
+						"header": [],
+						"url": {
+							"raw": "http://localhost:8083/api/inventory",
+							"protocol": "http",
+							"host": ["localhost"],
+							"port": "8083",
+							"path": ["api", "inventory"]
 						}
 					}
 				}
 			]
 		},
 		{
-			"name": "2. Payment Service (Port 8082)",
+			"name": "3. Payment Service (Port 8082)",
 			"item": [
 				{
 					"name": "Get Payment By ID",
@@ -160,8 +211,41 @@
 							"host": ["localhost"],
 							"port": "8082",
 							"path": ["api", "payments", "order", "1"]
+						}
+					}
+				}
+			]
+		},
+		{
+			"name": "4. Saga Orchestrator (Port 8084)",
+			"item": [
+				{
+					"name": "Get Saga Instance By Order ID",
+					"request": {
+						"method": "GET",
+						"header": [],
+						"url": {
+							"raw": "http://localhost:8084/api/sagas/order/1",
+							"protocol": "http",
+							"host": ["localhost"],
+							"port": "8084",
+							"path": ["api", "sagas", "order", "1"]
 						},
-						"description": "Verifies that Payment Service created a Payment record asynchronously after receiving OrderCreatedEvent."
+						"description": "Inspect the Saga State Machine state (STARTED, INVENTORY_RESERVED, PAYMENT_PENDING, COMPLETED, or COMPENSATING_INVENTORY, FAILED)."
+					}
+				},
+				{
+					"name": "Get All Saga Instances",
+					"request": {
+						"method": "GET",
+						"header": [],
+						"url": {
+							"raw": "http://localhost:8084/api/sagas",
+							"protocol": "http",
+							"host": ["localhost"],
+							"port": "8084",
+							"path": ["api", "sagas"]
+						}
 					}
 				}
 			]

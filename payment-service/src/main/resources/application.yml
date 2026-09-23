@@ -38,8 +38,8 @@ spring:
 app:
   kafka:
     topics:
-      order-created: order-created
-      payment-processed: payment-processed
+      payment-command: payment-command
+      payment-result: payment-result
 
 logging:
   level:

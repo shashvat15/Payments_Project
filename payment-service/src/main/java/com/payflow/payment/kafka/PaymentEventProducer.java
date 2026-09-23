@@ -13,30 +13,31 @@ public class PaymentEventProducer {
     private static final Logger log = LoggerFactory.getLogger(PaymentEventProducer.class);
 
     private final KafkaTemplate<String, Object> kafkaTemplate;
-    private final String paymentProcessedTopic;
+    private final String paymentResultTopic;
 
     public PaymentEventProducer(
             KafkaTemplate<String, Object> kafkaTemplate,
-            @Value("${app.kafka.topics.payment-processed:payment-processed}") String paymentProcessedTopic) {
+            @Value("${app.kafka.topics.payment-result:payment-result}") String paymentResultTopic) {
         this.kafkaTemplate = kafkaTemplate;
-        this.paymentProcessedTopic = paymentProcessedTopic;
+        this.paymentResultTopic = paymentResultTopic;
     }
 
     public void sendPaymentProcessedEvent(PaymentProcessedEvent event) {
         String key = String.valueOf(event.getOrderId());
-        log.info("Publishing PaymentProcessedEvent to topic '{}' with key '{}': eventId={}, paymentId={}, status={}",
-                paymentProcessedTopic, key, event.getEventId(), event.getPaymentId(), event.getStatus());
+        log.info("Publishing PaymentProcessedEvent to topic '{}' with key '{}': sagaId={}, eventId={}, paymentId={}, status={}",
+                paymentResultTopic, key, event.getSagaId(), event.getEventId(), event.getPaymentId(), event.getStatus());
 
-        kafkaTemplate.send(paymentProcessedTopic, key, event)
+        kafkaTemplate.send(paymentResultTopic, key, event)
                 .whenComplete((result, ex) -> {
                     if (ex == null) {
-                        log.info("Successfully published PaymentProcessedEvent [eventId={}] to partition {} at offset {}",
+                        log.info("Successfully published PaymentProcessedEvent [eventId={}, sagaId={}] to partition {} at offset {}",
                                 event.getEventId(),
+                                event.getSagaId(),
                                 result.getRecordMetadata().partition(),
                                 result.getRecordMetadata().offset());
                     } else {
-                        log.error("Failed to publish PaymentProcessedEvent [eventId={}]: {}",
-                                event.getEventId(), ex.getMessage(), ex);
+                        log.error("Failed to publish PaymentProcessedEvent [eventId={}, sagaId={}]: {}",
+                                event.getEventId(), event.getSagaId(), ex.getMessage(), ex);
                     }
                 });
     }

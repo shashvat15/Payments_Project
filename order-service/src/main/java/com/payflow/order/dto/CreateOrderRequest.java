@@ -14,8 +14,13 @@ public class CreateOrderRequest {
     @DecimalMin(value = "0.01", message = "Amount must be greater than zero")
     private BigDecimal amount;
 
+    // Phase 2B Inventory Fields
+    private Long productId = 1001L;
+    private Integer quantity = 1;
+
     // Simulation flags for demonstrating distributed failure modes
     private Boolean simulatePaymentFailure = false;
+    private Boolean simulateInventoryFailure = false;
     private Boolean simulateOrderUpdateFailure = false;
     private Boolean simulateKafkaPublishFailure = false;
 
@@ -25,7 +30,10 @@ public class CreateOrderRequest {
     public CreateOrderRequest(Long customerId, BigDecimal amount) {
         this.customerId = customerId;
         this.amount = amount;
+        this.productId = 1001L;
+        this.quantity = 1;
         this.simulatePaymentFailure = false;
+        this.simulateInventoryFailure = false;
         this.simulateOrderUpdateFailure = false;
         this.simulateKafkaPublishFailure = false;
     }
@@ -33,7 +41,10 @@ public class CreateOrderRequest {
     public CreateOrderRequest(Long customerId, BigDecimal amount, Boolean simulatePaymentFailure) {
         this.customerId = customerId;
         this.amount = amount;
+        this.productId = 1001L;
+        this.quantity = 1;
         this.simulatePaymentFailure = simulatePaymentFailure != null && simulatePaymentFailure;
+        this.simulateInventoryFailure = false;
         this.simulateOrderUpdateFailure = false;
         this.simulateKafkaPublishFailure = false;
     }
@@ -41,7 +52,10 @@ public class CreateOrderRequest {
     public CreateOrderRequest(Long customerId, BigDecimal amount, Boolean simulatePaymentFailure, Boolean simulateOrderUpdateFailure) {
         this.customerId = customerId;
         this.amount = amount;
+        this.productId = 1001L;
+        this.quantity = 1;
         this.simulatePaymentFailure = simulatePaymentFailure != null && simulatePaymentFailure;
+        this.simulateInventoryFailure = false;
         this.simulateOrderUpdateFailure = simulateOrderUpdateFailure != null && simulateOrderUpdateFailure;
         this.simulateKafkaPublishFailure = false;
     }
@@ -49,9 +63,23 @@ public class CreateOrderRequest {
     public CreateOrderRequest(Long customerId, BigDecimal amount, Boolean simulatePaymentFailure, Boolean simulateOrderUpdateFailure, Boolean simulateKafkaPublishFailure) {
         this.customerId = customerId;
         this.amount = amount;
+        this.productId = 1001L;
+        this.quantity = 1;
         this.simulatePaymentFailure = simulatePaymentFailure != null && simulatePaymentFailure;
+        this.simulateInventoryFailure = false;
         this.simulateOrderUpdateFailure = simulateOrderUpdateFailure != null && simulateOrderUpdateFailure;
         this.simulateKafkaPublishFailure = simulateKafkaPublishFailure != null && simulateKafkaPublishFailure;
+    }
+
+    public CreateOrderRequest(Long customerId, BigDecimal amount, Long productId, Integer quantity, Boolean simulatePaymentFailure, Boolean simulateInventoryFailure) {
+        this.customerId = customerId;
+        this.amount = amount;
+        this.productId = productId != null ? productId : 1001L;
+        this.quantity = quantity != null ? quantity : 1;
+        this.simulatePaymentFailure = simulatePaymentFailure != null && simulatePaymentFailure;
+        this.simulateInventoryFailure = simulateInventoryFailure != null && simulateInventoryFailure;
+        this.simulateOrderUpdateFailure = false;
+        this.simulateKafkaPublishFailure = false;
     }
 
     public Long getCustomerId() {
@@ -70,12 +98,36 @@ public class CreateOrderRequest {
         this.amount = amount;
     }
 
+    public Long getProductId() {
+        return productId;
+    }
+
+    public void setProductId(Long productId) {
+        this.productId = productId;
+    }
+
+    public Integer getQuantity() {
+        return quantity;
+    }
+
+    public void setQuantity(Integer quantity) {
+        this.quantity = quantity;
+    }
+
     public Boolean getSimulatePaymentFailure() {
         return simulatePaymentFailure;
     }
 
     public void setSimulatePaymentFailure(Boolean simulatePaymentFailure) {
         this.simulatePaymentFailure = simulatePaymentFailure;
+    }
+
+    public Boolean getSimulateInventoryFailure() {
+        return simulateInventoryFailure;
+    }
+
+    public void setSimulateInventoryFailure(Boolean simulateInventoryFailure) {
+        this.simulateInventoryFailure = simulateInventoryFailure;
     }
 
     public Boolean getSimulateOrderUpdateFailure() {

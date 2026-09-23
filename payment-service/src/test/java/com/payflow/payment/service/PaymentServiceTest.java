@@ -46,6 +46,43 @@ class PaymentServiceTest {
     }
 
     @Test
+    @DisplayName("Should process payment successfully from ProcessPaymentCommand (Saga Phase 2B)")
+    void testProcessPaymentFromCommand_Success() {
+        com.payflow.payment.command.ProcessPaymentCommand cmd = new com.payflow.payment.command.ProcessPaymentCommand(
+                "cmd-001", "saga-001", 101L, 42L, new BigDecimal("5000.00"), false, LocalDateTime.now()
+        );
+        when(paymentRepository.save(any(Payment.class))).thenReturn(samplePayment);
+
+        PaymentProcessedEvent result = paymentService.processPaymentFromCommand(cmd);
+
+        assertNotNull(result);
+        assertEquals("saga-001", result.getSagaId());
+        assertEquals(101L, result.getOrderId());
+        assertEquals(1L, result.getPaymentId());
+        assertEquals("SUCCESS", result.getStatus());
+    }
+
+    @Test
+    @DisplayName("Should record FAILED payment from ProcessPaymentCommand when simulatePaymentFailure is true")
+    void testProcessPaymentFromCommand_SimulatedFailure() {
+        com.payflow.payment.command.ProcessPaymentCommand cmd = new com.payflow.payment.command.ProcessPaymentCommand(
+                "cmd-002", "saga-002", 101L, 42L, new BigDecimal("5000.00"), true, LocalDateTime.now()
+        );
+        Payment failedPayment = new Payment(101L, new BigDecimal("5000.00"), PaymentStatus.FAILED);
+        failedPayment.setId(2L);
+        failedPayment.setCreatedAt(LocalDateTime.now());
+
+        when(paymentRepository.save(any(Payment.class))).thenReturn(failedPayment);
+
+        PaymentProcessedEvent result = paymentService.processPaymentFromCommand(cmd);
+
+        assertNotNull(result);
+        assertEquals("saga-002", result.getSagaId());
+        assertEquals("FAILED", result.getStatus());
+        assertEquals(2L, result.getPaymentId());
+    }
+
+    @Test
     @DisplayName("Should process payment successfully from Kafka OrderCreatedEvent")
     void testProcessPaymentFromEvent_Success() {
         OrderCreatedEvent event = new OrderCreatedEvent("evt-001", 101L, 42L, new BigDecimal("5000.00"), false, LocalDateTime.now());

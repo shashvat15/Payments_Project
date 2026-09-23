@@ -6,14 +6,17 @@ import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
 import org.springframework.kafka.config.TopicBuilder;
 
+import org.springframework.context.annotation.Profile;
+
 @Configuration
+@Profile("!test")
 public class KafkaConfig {
 
     @Value("${app.kafka.topics.order-created:order-created}")
     private String orderCreatedTopic;
 
-    @Value("${app.kafka.topics.payment-processed:payment-processed}")
-    private String paymentProcessedTopic;
+    @Value("${app.kafka.topics.order-command:order-command}")
+    private String orderCommandTopic;
 
     @Bean
     public NewTopic orderCreatedTopic() {
@@ -24,8 +27,8 @@ public class KafkaConfig {
     }
 
     @Bean
-    public NewTopic paymentProcessedTopic() {
-        return TopicBuilder.name(paymentProcessedTopic)
+    public NewTopic orderCommandTopic() {
+        return TopicBuilder.name(orderCommandTopic)
                 .partitions(1)
                 .replicas(1)
                 .build();

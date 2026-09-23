@@ -38,8 +38,8 @@ public class OrderService {
      * 3. Returns immediately with PAYMENT_PENDING status (non-blocking).
      */
     public OrderResponse createOrder(CreateOrderRequest request) {
-        log.info("Initiating asynchronous order creation for customerId: {}, amount: {}",
-                request.getCustomerId(), request.getAmount());
+        log.info("Initiating asynchronous order creation for customerId: {}, amount: {}, productId: {}, quantity: {}",
+                request.getCustomerId(), request.getAmount(), request.getProductId(), request.getQuantity());
 
         // Step 1: Save Order in order_db with status PAYMENT_PENDING
         Order order = saveInitialOrder(request);
@@ -53,16 +53,24 @@ public class OrderService {
                             + " was committed to order_db, but Kafka event publishing failed! Order is permanently stuck in PAYMENT_PENDING.");
         }
 
-        // Step 3: Publish OrderCreatedEvent to Kafka asynchronously
+        // Step 3: Publish OrderCreatedEvent with sagaId and inventory details to Kafka asynchronously
+        String sagaId = java.util.UUID.randomUUID().toString();
+        Long productId = request.getProductId() != null ? request.getProductId() : 1001L;
+        Integer quantity = request.getQuantity() != null ? request.getQuantity() : 1;
+
         OrderCreatedEvent event = new OrderCreatedEvent(
+                sagaId,
                 order.getId(),
                 order.getCustomerId(),
+                productId,
+                quantity,
                 order.getAmount(),
-                request.getSimulatePaymentFailure()
+                request.getSimulatePaymentFailure(),
+                request.getSimulateInventoryFailure()
         );
 
         orderEventProducer.sendOrderCreatedEvent(event);
-        log.info("OrderCreatedEvent sent to Kafka for orderId: {}", order.getId());
+        log.info("[Saga: {}] OrderCreatedEvent sent to Kafka for orderId: {}", sagaId, order.getId());
 
         // Step 4: Return immediate response to client (PAYMENT_PENDING)
         return mapToResponse(order);
@@ -79,7 +87,35 @@ public class OrderService {
     }
 
     /**
-     * Handles PaymentProcessedEvent received from Payment Service via Kafka.
+     * Phase 2B Saga Command: Confirm the order upon successful payment.
+     */
+    @Transactional
+    public Order confirmOrder(Long orderId) {
+        log.info("Confirming order #{} via Saga Orchestrator command", orderId);
+        Order order = orderRepository.findById(orderId)
+                .orElseThrow(() -> new ResourceNotFoundException("Order not found with id: " + orderId));
+        order.setStatus(OrderStatus.PAID);
+        Order updated = orderRepository.save(order);
+        log.info("Order #{} confirmed and updated to PAID", orderId);
+        return updated;
+    }
+
+    /**
+     * Phase 2B Saga Command: Cancel the order upon Saga failure or compensation.
+     */
+    @Transactional
+    public Order cancelOrder(Long orderId, String reason) {
+        log.warn("Cancelling order #{} via Saga Orchestrator command. Reason: {}", orderId, reason);
+        Order order = orderRepository.findById(orderId)
+                .orElseThrow(() -> new ResourceNotFoundException("Order not found with id: " + orderId));
+        order.setStatus(OrderStatus.CANCELLED);
+        Order updated = orderRepository.save(order);
+        log.info("Order #{} cancelled and updated to CANCELLED", orderId);
+        return updated;
+    }
+
+    /**
+     * Handles PaymentProcessedEvent received from Payment Service via Kafka (Phase 2A legacy).
      * Transitions order state to PAID or PAYMENT_FAILED.
      */
     @Transactional

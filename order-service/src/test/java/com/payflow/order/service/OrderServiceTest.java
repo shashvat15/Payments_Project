@@ -136,6 +136,36 @@ class OrderServiceTest {
     }
 
     @Test
+    @DisplayName("Should confirm order and set status to PAID on Saga ConfirmOrder command")
+    void testConfirmOrder_Success() {
+        Order paidOrder = new Order(42L, new BigDecimal("5000.00"), OrderStatus.PAID);
+        paidOrder.setId(1L);
+
+        when(orderRepository.findById(1L)).thenReturn(Optional.of(pendingOrder));
+        when(orderRepository.save(any(Order.class))).thenReturn(paidOrder);
+
+        Order result = orderService.confirmOrder(1L);
+
+        assertEquals(OrderStatus.PAID, result.getStatus());
+        verify(orderRepository).save(pendingOrder);
+    }
+
+    @Test
+    @DisplayName("Should cancel order and set status to CANCELLED on Saga CancelOrder command")
+    void testCancelOrder_Success() {
+        Order cancelledOrder = new Order(42L, new BigDecimal("5000.00"), OrderStatus.CANCELLED);
+        cancelledOrder.setId(1L);
+
+        when(orderRepository.findById(1L)).thenReturn(Optional.of(pendingOrder));
+        when(orderRepository.save(any(Order.class))).thenReturn(cancelledOrder);
+
+        Order result = orderService.cancelOrder(1L, "Payment failed");
+
+        assertEquals(OrderStatus.CANCELLED, result.getStatus());
+        verify(orderRepository).save(pendingOrder);
+    }
+
+    @Test
     @DisplayName("Should get orders by customer ID")
     void testGetOrdersByCustomerId() {
         when(orderRepository.findByCustomerId(42L)).thenReturn(List.of(pendingOrder));

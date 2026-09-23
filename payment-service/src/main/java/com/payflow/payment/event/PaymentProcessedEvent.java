@@ -7,10 +7,11 @@ import java.util.UUID;
 public class PaymentProcessedEvent {
 
     private String eventId;
+    private String sagaId;
     private Long orderId;
     private Long paymentId;
     private BigDecimal amount;
-    private String status;
+    private String status; // SUCCESS or FAILED
     private LocalDateTime timestamp;
 
     public PaymentProcessedEvent() {
@@ -25,8 +26,19 @@ public class PaymentProcessedEvent {
         this.timestamp = LocalDateTime.now();
     }
 
-    public PaymentProcessedEvent(String eventId, Long orderId, Long paymentId, BigDecimal amount, String status, LocalDateTime timestamp) {
+    public PaymentProcessedEvent(String sagaId, Long orderId, Long paymentId, BigDecimal amount, String status) {
+        this.eventId = UUID.randomUUID().toString();
+        this.sagaId = sagaId;
+        this.orderId = orderId;
+        this.paymentId = paymentId;
+        this.amount = amount;
+        this.status = status;
+        this.timestamp = LocalDateTime.now();
+    }
+
+    public PaymentProcessedEvent(String eventId, String sagaId, Long orderId, Long paymentId, BigDecimal amount, String status, LocalDateTime timestamp) {
         this.eventId = eventId;
+        this.sagaId = sagaId;
         this.orderId = orderId;
         this.paymentId = paymentId;
         this.amount = amount;
@@ -40,6 +52,14 @@ public class PaymentProcessedEvent {
 
     public void setEventId(String eventId) {
         this.eventId = eventId;
+    }
+
+    public String getSagaId() {
+        return sagaId;
+    }
+
+    public void setSagaId(String sagaId) {
+        this.sagaId = sagaId;
     }
 
     public Long getOrderId() {

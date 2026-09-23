@@ -68,6 +68,70 @@ services:
     networks:
       - payflow-net
 
+  # Database dedicated exclusively to Inventory Service (Phase 2B)
+  inventory-db:
+    image: postgres:16-alpine
+    container_name: payflow-inventory-db
+    environment:
+      POSTGRES_DB: inventory_db
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: password
+    ports:
+      - "5434:5432" # Exposed on host 5434
+    volumes:
+      - inventory_db_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres -d inventory_db"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+    networks:
+      - payflow-net
+
+  # Database dedicated exclusively to Saga Orchestrator (Phase 2B)
+  saga-db:
+    image: postgres:16-alpine
+    container_name: payflow-saga-db
+    environment:
+      POSTGRES_DB: saga_db
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: password
+    ports:
+      - "5435:5432" # Exposed on host 5435
+    volumes:
+      - saga_db_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres -d saga_db"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+    networks:
+      - payflow-net
+
+  # Inventory Service Application (Phase 2B)
+  inventory-service:
+    build:
+      context: ./inventory-service
+      dockerfile: Dockerfile
+    container_name: payflow-inventory-service
+    ports:
+      - "8083:8083"
+    environment:
+      SERVER_PORT: 8083
+      DB_HOST: inventory-db
+      DB_PORT: 5432
+      DB_NAME: inventory_db
+      DB_USERNAME: postgres
+      DB_PASSWORD: password
+      KAFKA_BOOTSTRAP_SERVERS: kafka:9092
+    depends_on:
+      inventory-db:
+        condition: service_healthy
+      kafka:
+        condition: service_healthy
+    networks:
+      - payflow-net
+
   # Payment Service Application
   payment-service:
     build:
@@ -116,9 +180,35 @@ services:
     networks:
       - payflow-net
 
+  # Saga Orchestrator Application (Phase 2B)
+  saga-orchestrator:
+    build:
+      context: ./saga-orchestrator
+      dockerfile: Dockerfile
+    container_name: payflow-saga-orchestrator
+    ports:
+      - "8084:8084"
+    environment:
+      SERVER_PORT: 8084
+      DB_HOST: saga-db
+      DB_PORT: 5432
+      DB_NAME: saga_db
+      DB_USERNAME: postgres
+      DB_PASSWORD: password
+      KAFKA_BOOTSTRAP_SERVERS: kafka:9092
+    depends_on:
+      saga-db:
+        condition: service_healthy
+      kafka:
+        condition: service_healthy
+    networks:
+      - payflow-net
+
 volumes:
   order_db_data:
   payment_db_data:
+  inventory_db_data:
+  saga_db_data:
 
 networks:
   payflow-net:

@@ -28,6 +28,38 @@ public class PaymentService {
     }
 
     /**
+     * Phase 2B Saga: Processes payment triggered by Saga Orchestrator via ProcessPaymentCommand.
+     * Persists payment in payment_db and returns PaymentProcessedEvent containing sagaId to publish to payment-result.
+     */
+    @Transactional
+    public PaymentProcessedEvent processPaymentFromCommand(com.payflow.payment.command.ProcessPaymentCommand command) {
+        log.info("[Saga: {}] Processing payment from command for orderId: {}, amount: {}, simulateFailure: {}",
+                command.getSagaId(), command.getOrderId(), command.getAmount(), command.getSimulatePaymentFailure());
+
+        PaymentStatus status = Boolean.TRUE.equals(command.getSimulatePaymentFailure())
+                ? PaymentStatus.FAILED
+                : PaymentStatus.SUCCESS;
+
+        Payment payment = new Payment(
+                command.getOrderId(),
+                command.getAmount(),
+                status
+        );
+
+        Payment savedPayment = paymentRepository.save(payment);
+        log.info("[Saga: {}] Payment saved in payment_db with id: {}, status: {}",
+                command.getSagaId(), savedPayment.getId(), savedPayment.getStatus());
+
+        return new PaymentProcessedEvent(
+                command.getSagaId(),
+                savedPayment.getOrderId(),
+                savedPayment.getId(),
+                savedPayment.getAmount(),
+                savedPayment.getStatus().name()
+        );
+    }
+
+    /**
      * Processes payment triggered asynchronously via Kafka OrderCreatedEvent.
      * Persists payment in payment_db and returns PaymentProcessedEvent to be published back to Kafka.
      */
