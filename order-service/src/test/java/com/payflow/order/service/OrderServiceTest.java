@@ -28,6 +28,13 @@ import static org.junit.jupiter.api.Assertions.*;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.Mockito.*;
 
+import com.fasterxml.jackson.databind.ObjectMapper;
+import com.fasterxml.jackson.datatype.jsr310.JavaTimeModule;
+import com.payflow.order.entity.OutboxEvent;
+import com.payflow.order.entity.OutboxStatus;
+import com.payflow.order.repository.OutboxEventRepository;
+import org.mockito.Spy;
+
 @ExtendWith(MockitoExtension.class)
 class OrderServiceTest {
 
@@ -36,6 +43,12 @@ class OrderServiceTest {
 
     @Mock
     private OrderEventProducer orderEventProducer;
+
+    @Mock
+    private OutboxEventRepository outboxEventRepository;
+
+    @Spy
+    private ObjectMapper objectMapper = new ObjectMapper().registerModule(new JavaTimeModule());
 
     @InjectMocks
     private OrderService orderService;
@@ -51,8 +64,8 @@ class OrderServiceTest {
     }
 
     @Test
-    @DisplayName("Should create order with PAYMENT_PENDING and emit OrderCreatedEvent to Kafka")
-    void testCreateOrder_Success() {
+    @DisplayName("Should create order and save OutboxEvent in local DB transaction without calling Kafka directly")
+    void testCreateOrder_Success() throws Exception {
         CreateOrderRequest request = new CreateOrderRequest(42L, new BigDecimal("5000.00"));
         when(orderRepository.save(any(Order.class))).thenReturn(pendingOrder);
 
@@ -63,19 +76,41 @@ class OrderServiceTest {
         assertEquals(42L, response.getCustomerId());
         assertEquals(OrderStatus.PAYMENT_PENDING, response.getStatus());
 
-        ArgumentCaptor<OrderCreatedEvent> eventCaptor = ArgumentCaptor.forClass(OrderCreatedEvent.class);
-        verify(orderEventProducer).sendOrderCreatedEvent(eventCaptor.capture());
-        assertEquals(1L, eventCaptor.getValue().getOrderId());
-        assertEquals(new BigDecimal("5000.00"), eventCaptor.getValue().getAmount());
+        // Verify Order is saved in order_db
+        verify(orderRepository).save(any(Order.class));
+
+        // Verify OutboxEvent is saved in order_db with status NEW
+        ArgumentCaptor<OutboxEvent> outboxCaptor = ArgumentCaptor.forClass(OutboxEvent.class);
+        verify(outboxEventRepository).save(outboxCaptor.capture());
+        OutboxEvent savedOutbox = outboxCaptor.getValue();
+        assertEquals("OrderCreated", savedOutbox.getEventType());
+        assertEquals("Order", savedOutbox.getAggregateType());
+        assertEquals("1", savedOutbox.getAggregateId());
+        assertEquals(OutboxStatus.NEW, savedOutbox.getStatus());
+        assertNotNull(savedOutbox.getPayload());
+
+        // Verify Kafka is NOT directly called from within the business transaction
+        verify(orderEventProducer, never()).sendOrderCreatedEvent(any());
+
+        // Verify Outbox payload deserializes to OrderCreatedEvent
+        OrderCreatedEvent deserialized = objectMapper.readValue(savedOutbox.getPayload(), OrderCreatedEvent.class);
+        assertEquals(1L, deserialized.getOrderId());
+        assertEquals(42L, deserialized.getCustomerId());
+        assertEquals(new BigDecimal("5000.00"), deserialized.getAmount());
+        assertNotNull(deserialized.getSagaId());
     }
 
     @Test
-    @DisplayName("Should throw OrderProcessingException when simulated Kafka publish failure is triggered")
-    void testCreateOrder_SimulateKafkaPublishFailure() {
-        CreateOrderRequest request = new CreateOrderRequest(42L, new BigDecimal("5000.00"), false, false, true);
+    @DisplayName("Should persist Order and OutboxEvent atomically as part of the same transaction")
+    void testCreateOrder_OrderAndOutboxSavedTogether() {
+        CreateOrderRequest request = new CreateOrderRequest(42L, new BigDecimal("5000.00"), false, false, false);
         when(orderRepository.save(any(Order.class))).thenReturn(pendingOrder);
 
-        assertThrows(OrderProcessingException.class, () -> orderService.createOrder(request));
+        OrderResponse response = orderService.createOrder(request);
+
+        assertNotNull(response);
+        verify(orderRepository, times(1)).save(any(Order.class));
+        verify(outboxEventRepository, times(1)).save(any(OutboxEvent.class));
         verify(orderEventProducer, never()).sendOrderCreatedEvent(any());
     }
 

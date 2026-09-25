@@ -132,6 +132,63 @@
 							"path": ["api", "orders"]
 						}
 					}
+				},
+				{
+					"name": "Get All Outbox Events",
+					"request": {
+						"method": "GET",
+						"header": [],
+						"url": {
+							"raw": "http://localhost:8081/api/orders/outbox",
+							"protocol": "http",
+							"host": ["localhost"],
+							"port": "8081",
+							"path": ["api", "orders", "outbox"]
+						},
+						"description": "Fetches all outbox events in order_db to monitor transactional outbox status."
+					}
+				},
+				{
+					"name": "Get Pending Outbox Events (NEW)",
+					"request": {
+						"method": "GET",
+						"header": [],
+						"url": {
+							"raw": "http://localhost:8081/api/orders/outbox?status=NEW",
+							"protocol": "http",
+							"host": ["localhost"],
+							"port": "8081",
+							"path": ["api", "orders", "outbox"],
+							"query": [
+								{
+									"key": "status",
+									"value": "NEW"
+								}
+							]
+						},
+						"description": "Fetches outbox events with status NEW (pending Kafka publication)."
+					}
+				},
+				{
+					"name": "Get Published Outbox Events (PUBLISHED)",
+					"request": {
+						"method": "GET",
+						"header": [],
+						"url": {
+							"raw": "http://localhost:8081/api/orders/outbox?status=PUBLISHED",
+							"protocol": "http",
+							"host": ["localhost"],
+							"port": "8081",
+							"path": ["api", "orders", "outbox"],
+							"query": [
+								{
+									"key": "status",
+									"value": "PUBLISHED"
+								}
+							]
+						},
+						"description": "Fetches outbox events with status PUBLISHED (successfully acknowledged by Kafka)."
+					}
 				}
 			]
 		},

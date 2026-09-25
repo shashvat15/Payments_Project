@@ -1,15 +1,20 @@
 package com.payflow.order.service;
 
+import com.fasterxml.jackson.core.JsonProcessingException;
+import com.fasterxml.jackson.databind.ObjectMapper;
 import com.payflow.order.dto.CreateOrderRequest;
 import com.payflow.order.dto.OrderResponse;
 import com.payflow.order.entity.Order;
 import com.payflow.order.entity.OrderStatus;
+import com.payflow.order.entity.OutboxEvent;
+import com.payflow.order.entity.OutboxStatus;
 import com.payflow.order.event.OrderCreatedEvent;
 import com.payflow.order.event.PaymentProcessedEvent;
 import com.payflow.order.exception.OrderProcessingException;
 import com.payflow.order.exception.ResourceNotFoundException;
 import com.payflow.order.kafka.OrderEventProducer;
 import com.payflow.order.repository.OrderRepository;
+import com.payflow.order.repository.OutboxEventRepository;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.stereotype.Service;
@@ -25,35 +30,43 @@ public class OrderService {
 
     private final OrderRepository orderRepository;
     private final OrderEventProducer orderEventProducer;
+    private final OutboxEventRepository outboxEventRepository;
+    private final ObjectMapper objectMapper;
 
-    public OrderService(OrderRepository orderRepository, OrderEventProducer orderEventProducer) {
+    public OrderService(
+            OrderRepository orderRepository,
+            OrderEventProducer orderEventProducer,
+            OutboxEventRepository outboxEventRepository,
+            ObjectMapper objectMapper) {
         this.orderRepository = orderRepository;
         this.orderEventProducer = orderEventProducer;
+        this.outboxEventRepository = outboxEventRepository;
+        this.objectMapper = objectMapper;
     }
 
     /**
-     * Phase 2A Asynchronous Checkout Flow:
+     * Phase 2C Transactional Outbox Pattern:
      * 1. Inserts Order with status PAYMENT_PENDING in order_db.
-     * 2. Publishes OrderCreatedEvent to Kafka topic 'order-created'.
-     * 3. Returns immediately with PAYMENT_PENDING status (non-blocking).
+     * 2. Saves OutboxEvent containing the serialized OrderCreatedEvent payload in order_db.
+     * 3. Both writes commit atomically in the SAME local database transaction.
+     * 4. Kafka is NOT called within this transaction. OutboxPublisher handles Kafka publication separately.
+     * 5. Returns immediately with PAYMENT_PENDING status.
      */
+    @Transactional
     public OrderResponse createOrder(CreateOrderRequest request) {
-        log.info("Initiating asynchronous order creation for customerId: {}, amount: {}, productId: {}, quantity: {}",
+        log.info("Initiating transactional order creation for customerId: {}, amount: {}, productId: {}, quantity: {}",
                 request.getCustomerId(), request.getAmount(), request.getProductId(), request.getQuantity());
 
         // Step 1: Save Order in order_db with status PAYMENT_PENDING
-        Order order = saveInitialOrder(request);
+        Order order = new Order(
+                request.getCustomerId(),
+                request.getAmount(),
+                OrderStatus.PAYMENT_PENDING
+        );
+        order = orderRepository.save(order);
         log.info("Order created in order_db with ID: {} and status: {}", order.getId(), order.getStatus());
 
-        // Step 2: Simulate the Dual-Write Failure Problem (Order DB write succeeds, but Kafka publish fails)
-        if (Boolean.TRUE.equals(request.getSimulateKafkaPublishFailure())) {
-            log.error("SIMULATION: Intentionally crashing during Kafka publish for order ID {} to demonstrate Dual-Write inconsistency!", order.getId());
-            throw new OrderProcessingException(
-                    "Simulated Dual-Write failure: Order #" + order.getId()
-                            + " was committed to order_db, but Kafka event publishing failed! Order is permanently stuck in PAYMENT_PENDING.");
-        }
-
-        // Step 3: Publish OrderCreatedEvent with sagaId and inventory details to Kafka asynchronously
+        // Step 2: Build OrderCreatedEvent for the Saga Orchestrator
         String sagaId = java.util.UUID.randomUUID().toString();
         Long productId = request.getProductId() != null ? request.getProductId() : 1001L;
         Integer quantity = request.getQuantity() != null ? request.getQuantity() : 1;
@@ -69,8 +82,22 @@ public class OrderService {
                 request.getSimulateInventoryFailure()
         );
 
-        orderEventProducer.sendOrderCreatedEvent(event);
-        log.info("[Saga: {}] OrderCreatedEvent sent to Kafka for orderId: {}", sagaId, order.getId());
+        // Step 3: Save OutboxEvent inside the SAME local database transaction
+        try {
+            String payload = objectMapper.writeValueAsString(event);
+            OutboxEvent outboxEvent = new OutboxEvent(
+                    "OrderCreated",
+                    "Order",
+                    String.valueOf(order.getId()),
+                    payload
+            );
+            outboxEventRepository.save(outboxEvent);
+            log.info("[Outbox] OutboxEvent saved in order_db for order #{} [sagaId: {}] with status NEW",
+                    order.getId(), sagaId);
+        } catch (JsonProcessingException e) {
+            log.error("Failed to serialize OrderCreatedEvent to JSON for orderId: {}", order.getId(), e);
+            throw new OrderProcessingException("Failed to serialize outbox event payload: " + e.getMessage());
+        }
 
         // Step 4: Return immediate response to client (PAYMENT_PENDING)
         return mapToResponse(order);
@@ -166,6 +193,14 @@ public class OrderService {
         return orderRepository.findByCustomerId(customerId).stream()
                 .map(this::mapToResponse)
                 .collect(Collectors.toList());
+    }
+
+    @Transactional(readOnly = true)
+    public List<OutboxEvent> getOutboxEvents(OutboxStatus status) {
+        if (status != null) {
+            return outboxEventRepository.findByStatusOrderByCreatedAtAsc(status);
+        }
+        return outboxEventRepository.findAll();
     }
 
     private OrderResponse mapToResponse(Order order) {

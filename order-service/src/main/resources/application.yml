@@ -40,6 +40,10 @@ app:
     topics:
       order-created: order-created
       order-command: order-command
+  outbox:
+    publisher:
+      fixed-delay: 2000
+      timeout-ms: 5000
 
 logging:
   level:

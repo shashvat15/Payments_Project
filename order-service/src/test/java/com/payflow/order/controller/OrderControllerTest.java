@@ -114,4 +114,21 @@ class OrderControllerTest {
                 .andExpect(jsonPath("$[0].id").value(1))
                 .andExpect(jsonPath("$[0].status").value("PAID"));
     }
+
+    @Test
+    @DisplayName("GET /api/orders/outbox should return 200 with list of outbox events")
+    void testGetOutboxEvents() throws Exception {
+        com.payflow.order.entity.OutboxEvent event = new com.payflow.order.entity.OutboxEvent(
+                "OrderCreated", "Order", "1", "{\"orderId\":1}"
+        );
+        event.setId(1L);
+
+        when(orderService.getOutboxEvents(any())).thenReturn(List.of(event));
+
+        mockMvc.perform(get("/api/orders/outbox"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$[0].id").value(1))
+                .andExpect(jsonPath("$[0].eventType").value("OrderCreated"))
+                .andExpect(jsonPath("$[0].status").value("NEW"));
+    }
 }

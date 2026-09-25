@@ -49,4 +49,11 @@ public class OrderController {
         log.info("Fetching all orders");
         return ResponseEntity.ok(orderService.getAllOrders());
     }
+
+    @GetMapping("/outbox")
+    public ResponseEntity<List<com.payflow.order.entity.OutboxEvent>> getOutboxEvents(
+            @RequestParam(value = "status", required = false) com.payflow.order.entity.OutboxStatus status) {
+        log.info("Fetching outbox events, status filter: {}", status);
+        return ResponseEntity.ok(orderService.getOutboxEvents(status));
+    }
 }
