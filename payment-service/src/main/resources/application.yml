@@ -40,6 +40,10 @@ app:
     topics:
       payment-command: payment-command
       payment-result: payment-result
+  outbox:
+    publisher:
+      fixed-delay: 2000
+      timeout-ms: 5000
 
 logging:
   level:

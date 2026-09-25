@@ -40,6 +40,10 @@ app:
     topics:
       inventory-command: inventory-command
       inventory-result: inventory-result
+  outbox:
+    publisher:
+      fixed-delay: 2000
+      timeout-ms: 5000
 
 logging:
   level:

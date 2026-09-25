@@ -89,6 +89,8 @@ public class OrderService {
                     "OrderCreated",
                     "Order",
                     String.valueOf(order.getId()),
+                    "order-created",
+                    String.valueOf(order.getId()),
                     payload
             );
             outboxEventRepository.save(outboxEvent);

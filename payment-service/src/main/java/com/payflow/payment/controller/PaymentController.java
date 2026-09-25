@@ -2,6 +2,7 @@ package com.payflow.payment.controller;
 
 import com.payflow.payment.dto.PaymentResponse;
 import com.payflow.payment.dto.ProcessPaymentRequest;
+import com.payflow.payment.entity.OutboxEvent;
 import com.payflow.payment.service.PaymentService;
 import jakarta.validation.Valid;
 import org.slf4j.Logger;
@@ -52,5 +53,11 @@ public class PaymentController {
         log.info("Fetching payments for orderId: {}", orderId);
         List<PaymentResponse> responses = paymentService.getPaymentsByOrderId(orderId);
         return ResponseEntity.ok(responses);
+    }
+
+    @GetMapping("/outbox")
+    public ResponseEntity<List<OutboxEvent>> getOutboxEvents() {
+        log.info("Fetching all outbox events in payment_db");
+        return ResponseEntity.ok(paymentService.getOutboxEvents());
     }
 }

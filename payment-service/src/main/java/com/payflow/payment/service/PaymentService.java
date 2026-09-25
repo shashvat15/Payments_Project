@@ -1,12 +1,17 @@
 package com.payflow.payment.service;
 
+import com.fasterxml.jackson.core.JsonProcessingException;
+import com.fasterxml.jackson.databind.ObjectMapper;
+import com.payflow.payment.command.ProcessPaymentCommand;
 import com.payflow.payment.dto.PaymentResponse;
 import com.payflow.payment.dto.ProcessPaymentRequest;
+import com.payflow.payment.entity.OutboxEvent;
 import com.payflow.payment.entity.Payment;
 import com.payflow.payment.entity.PaymentStatus;
 import com.payflow.payment.event.OrderCreatedEvent;
 import com.payflow.payment.event.PaymentProcessedEvent;
 import com.payflow.payment.exception.ResourceNotFoundException;
+import com.payflow.payment.repository.OutboxEventRepository;
 import com.payflow.payment.repository.PaymentRepository;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -22,17 +27,28 @@ public class PaymentService {
     private static final Logger log = LoggerFactory.getLogger(PaymentService.class);
 
     private final PaymentRepository paymentRepository;
+    private final OutboxEventRepository outboxEventRepository;
+    private final ObjectMapper objectMapper;
 
-    public PaymentService(PaymentRepository paymentRepository) {
+    public PaymentService(
+            PaymentRepository paymentRepository,
+            OutboxEventRepository outboxEventRepository,
+            ObjectMapper objectMapper) {
         this.paymentRepository = paymentRepository;
+        this.outboxEventRepository = outboxEventRepository;
+        this.objectMapper = objectMapper;
     }
 
     /**
-     * Phase 2B Saga: Processes payment triggered by Saga Orchestrator via ProcessPaymentCommand.
-     * Persists payment in payment_db and returns PaymentProcessedEvent containing sagaId to publish to payment-result.
+     * Phase 2C Transactional Outbox Pattern:
+     * 1. Persists Payment (SUCCESS or FAILED) in payment_db.
+     * 2. Constructs PaymentProcessedEvent contract.
+     * 3. Persists OutboxEvent in payment_db with status NEW.
+     * 4. Payment and OutboxEvent are committed together in the SAME local database transaction.
+     * 5. Kafka publication is delegated to OutboxPublisher.
      */
     @Transactional
-    public PaymentProcessedEvent processPaymentFromCommand(com.payflow.payment.command.ProcessPaymentCommand command) {
+    public PaymentProcessedEvent processPaymentFromCommand(ProcessPaymentCommand command) {
         log.info("[Saga: {}] Processing payment from command for orderId: {}, amount: {}, simulateFailure: {}",
                 command.getSagaId(), command.getOrderId(), command.getAmount(), command.getSimulatePaymentFailure());
 
@@ -50,18 +66,39 @@ public class PaymentService {
         log.info("[Saga: {}] Payment saved in payment_db with id: {}, status: {}",
                 command.getSagaId(), savedPayment.getId(), savedPayment.getStatus());
 
-        return new PaymentProcessedEvent(
+        PaymentProcessedEvent event = new PaymentProcessedEvent(
                 command.getSagaId(),
                 savedPayment.getOrderId(),
                 savedPayment.getId(),
                 savedPayment.getAmount(),
                 savedPayment.getStatus().name()
         );
+
+        // Save OutboxEvent in the same local database transaction
+        try {
+            String payload = objectMapper.writeValueAsString(event);
+            OutboxEvent outboxEvent = new OutboxEvent(
+                    "PaymentProcessed",
+                    "Payment",
+                    String.valueOf(savedPayment.getId()),
+                    "payment-result",
+                    String.valueOf(savedPayment.getOrderId()),
+                    payload
+            );
+            outboxEventRepository.save(outboxEvent);
+            log.info("[Saga: {}] OutboxEvent saved in payment_db for payment #{} [orderId: {}] with status NEW",
+                    command.getSagaId(), savedPayment.getId(), savedPayment.getOrderId());
+        } catch (JsonProcessingException e) {
+            log.error("Failed to serialize PaymentProcessedEvent for orderId: {}", savedPayment.getOrderId(), e);
+            throw new RuntimeException("Failed to serialize outbox event payload: " + e.getMessage(), e);
+        }
+
+        return event;
     }
 
     /**
-     * Processes payment triggered asynchronously via Kafka OrderCreatedEvent.
-     * Persists payment in payment_db and returns PaymentProcessedEvent to be published back to Kafka.
+     * Processes payment triggered asynchronously via Kafka OrderCreatedEvent (Deprecated Phase 2A Choreography).
+     * Persists payment in payment_db and persists OutboxEvent to be published back to Kafka.
      */
     @Transactional
     public PaymentProcessedEvent processPaymentFromEvent(OrderCreatedEvent event) {
@@ -81,12 +118,30 @@ public class PaymentService {
         Payment savedPayment = paymentRepository.save(payment);
         log.info("Payment saved in payment_db with id: {}, status: {}", savedPayment.getId(), savedPayment.getStatus());
 
-        return new PaymentProcessedEvent(
+        PaymentProcessedEvent processedEvent = new PaymentProcessedEvent(
                 savedPayment.getOrderId(),
                 savedPayment.getId(),
                 savedPayment.getAmount(),
                 savedPayment.getStatus().name()
         );
+
+        try {
+            String payload = objectMapper.writeValueAsString(processedEvent);
+            OutboxEvent outboxEvent = new OutboxEvent(
+                    "PaymentProcessed",
+                    "Payment",
+                    String.valueOf(savedPayment.getId()),
+                    "payment-result",
+                    String.valueOf(savedPayment.getOrderId()),
+                    payload
+            );
+            outboxEventRepository.save(outboxEvent);
+        } catch (JsonProcessingException e) {
+            log.error("Failed to serialize PaymentProcessedEvent for orderId: {}", savedPayment.getOrderId(), e);
+            throw new RuntimeException("Failed to serialize outbox event payload: " + e.getMessage(), e);
+        }
+
+        return processedEvent;
     }
 
     @Transactional
@@ -123,6 +178,11 @@ public class PaymentService {
         return payments.stream()
                 .map(this::mapToResponse)
                 .collect(Collectors.toList());
+    }
+
+    @Transactional(readOnly = true)
+    public List<OutboxEvent> getOutboxEvents() {
+        return outboxEventRepository.findAll();
     }
 
     private PaymentResponse mapToResponse(Payment payment) {

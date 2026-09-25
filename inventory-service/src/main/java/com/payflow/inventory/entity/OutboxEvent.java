@@ -1,4 +1,4 @@
-package com.payflow.order.entity;
+package com.payflow.inventory.entity;
 
 import jakarta.persistence.*;
 import org.hibernate.annotations.CreationTimestamp;

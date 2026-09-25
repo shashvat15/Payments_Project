@@ -3,6 +3,7 @@ package com.payflow.payment.controller;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.payflow.payment.dto.PaymentResponse;
 import com.payflow.payment.dto.ProcessPaymentRequest;
+import com.payflow.payment.entity.OutboxEvent;
 import com.payflow.payment.entity.PaymentStatus;
 import com.payflow.payment.exception.ResourceNotFoundException;
 import com.payflow.payment.service.PaymentService;
@@ -113,5 +114,17 @@ class PaymentControllerTest {
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$[0].orderId").value(101))
                 .andExpect(jsonPath("$[0].status").value("SUCCESS"));
+    }
+
+    @Test
+    @DisplayName("GET /api/payments/outbox should return 200 with list of outbox events")
+    void testGetOutboxEvents() throws Exception {
+        OutboxEvent event = new OutboxEvent("PaymentProcessed", "Payment", "1", "payment-result", "101", "{}");
+        when(paymentService.getOutboxEvents()).thenReturn(List.of(event));
+
+        mockMvc.perform(get("/api/payments/outbox"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$[0].eventType").value("PaymentProcessed"))
+                .andExpect(jsonPath("$[0].topic").value("payment-result"));
     }
 }

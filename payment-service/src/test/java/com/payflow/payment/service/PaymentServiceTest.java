@@ -1,19 +1,23 @@
 package com.payflow.payment.service;
 
+import com.fasterxml.jackson.databind.ObjectMapper;
+import com.fasterxml.jackson.datatype.jsr310.JavaTimeModule;
 import com.payflow.payment.dto.PaymentResponse;
 import com.payflow.payment.dto.ProcessPaymentRequest;
+import com.payflow.payment.entity.OutboxEvent;
+import com.payflow.payment.entity.OutboxStatus;
 import com.payflow.payment.entity.Payment;
 import com.payflow.payment.entity.PaymentStatus;
 import com.payflow.payment.event.OrderCreatedEvent;
 import com.payflow.payment.event.PaymentProcessedEvent;
 import com.payflow.payment.exception.ResourceNotFoundException;
+import com.payflow.payment.repository.OutboxEventRepository;
 import com.payflow.payment.repository.PaymentRepository;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
 import org.mockito.ArgumentCaptor;
-import org.mockito.InjectMocks;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
 
@@ -32,13 +36,19 @@ class PaymentServiceTest {
     @Mock
     private PaymentRepository paymentRepository;
 
-    @InjectMocks
+    @Mock
+    private OutboxEventRepository outboxEventRepository;
+
+    private ObjectMapper objectMapper;
     private PaymentService paymentService;
 
     private Payment samplePayment;
 
     @BeforeEach
     void setUp() {
+        objectMapper = new ObjectMapper().registerModule(new JavaTimeModule());
+        paymentService = new PaymentService(paymentRepository, outboxEventRepository, objectMapper);
+
         samplePayment = new Payment(101L, new BigDecimal("5000.00"), PaymentStatus.SUCCESS);
         samplePayment.setId(1L);
         samplePayment.setCreatedAt(LocalDateTime.now());
@@ -46,7 +56,7 @@ class PaymentServiceTest {
     }
 
     @Test
-    @DisplayName("Should process payment successfully from ProcessPaymentCommand (Saga Phase 2B)")
+    @DisplayName("Should process payment and persist OutboxEvent atomically from ProcessPaymentCommand (Saga Phase 2C)")
     void testProcessPaymentFromCommand_Success() {
         com.payflow.payment.command.ProcessPaymentCommand cmd = new com.payflow.payment.command.ProcessPaymentCommand(
                 "cmd-001", "saga-001", 101L, 42L, new BigDecimal("5000.00"), false, LocalDateTime.now()
@@ -60,10 +70,25 @@ class PaymentServiceTest {
         assertEquals(101L, result.getOrderId());
         assertEquals(1L, result.getPaymentId());
         assertEquals("SUCCESS", result.getStatus());
+
+        // Verify Payment is saved
+        verify(paymentRepository).save(any(Payment.class));
+
+        // Verify OutboxEvent is saved with status NEW in the same local transaction
+        ArgumentCaptor<OutboxEvent> outboxCaptor = ArgumentCaptor.forClass(OutboxEvent.class);
+        verify(outboxEventRepository).save(outboxCaptor.capture());
+        OutboxEvent savedOutbox = outboxCaptor.getValue();
+        assertEquals("PaymentProcessed", savedOutbox.getEventType());
+        assertEquals("Payment", savedOutbox.getAggregateType());
+        assertEquals("1", savedOutbox.getAggregateId());
+        assertEquals("payment-result", savedOutbox.getTopic());
+        assertEquals("101", savedOutbox.getMessageKey());
+        assertEquals(OutboxStatus.NEW, savedOutbox.getStatus());
+        assertTrue(savedOutbox.getPayload().contains("SUCCESS"));
     }
 
     @Test
-    @DisplayName("Should record FAILED payment from ProcessPaymentCommand when simulatePaymentFailure is true")
+    @DisplayName("Should record FAILED payment and persist OutboxEvent when simulatePaymentFailure is true")
     void testProcessPaymentFromCommand_SimulatedFailure() {
         com.payflow.payment.command.ProcessPaymentCommand cmd = new com.payflow.payment.command.ProcessPaymentCommand(
                 "cmd-002", "saga-002", 101L, 42L, new BigDecimal("5000.00"), true, LocalDateTime.now()
@@ -80,10 +105,17 @@ class PaymentServiceTest {
         assertEquals("saga-002", result.getSagaId());
         assertEquals("FAILED", result.getStatus());
         assertEquals(2L, result.getPaymentId());
+
+        ArgumentCaptor<OutboxEvent> outboxCaptor = ArgumentCaptor.forClass(OutboxEvent.class);
+        verify(outboxEventRepository).save(outboxCaptor.capture());
+        OutboxEvent savedOutbox = outboxCaptor.getValue();
+        assertEquals("PaymentProcessed", savedOutbox.getEventType());
+        assertEquals(OutboxStatus.NEW, savedOutbox.getStatus());
+        assertTrue(savedOutbox.getPayload().contains("FAILED"));
     }
 
     @Test
-    @DisplayName("Should process payment successfully from Kafka OrderCreatedEvent")
+    @DisplayName("Should process payment successfully from Kafka OrderCreatedEvent and save outbox event")
     void testProcessPaymentFromEvent_Success() {
         OrderCreatedEvent event = new OrderCreatedEvent("evt-001", 101L, 42L, new BigDecimal("5000.00"), false, LocalDateTime.now());
         when(paymentRepository.save(any(Payment.class))).thenReturn(samplePayment);
@@ -99,6 +131,8 @@ class PaymentServiceTest {
         verify(paymentRepository).save(captor.capture());
         assertEquals(PaymentStatus.SUCCESS, captor.getValue().getStatus());
         assertEquals(101L, captor.getValue().getOrderId());
+
+        verify(outboxEventRepository).save(any(OutboxEvent.class));
     }
 
     @Test
@@ -116,6 +150,7 @@ class PaymentServiceTest {
         assertNotNull(result);
         assertEquals("FAILED", result.getStatus());
         assertEquals(2L, result.getPaymentId());
+        verify(outboxEventRepository).save(any(OutboxEvent.class));
     }
 
     @Test
@@ -162,5 +197,17 @@ class PaymentServiceTest {
 
         assertEquals(1, responses.size());
         assertEquals(101L, responses.get(0).getOrderId());
+    }
+
+    @Test
+    @DisplayName("Should retrieve outbox events from repository")
+    void testGetOutboxEvents() {
+        OutboxEvent event = new OutboxEvent("PaymentProcessed", "Payment", "1", "payment-result", "101", "{}");
+        when(outboxEventRepository.findAll()).thenReturn(List.of(event));
+
+        List<OutboxEvent> events = paymentService.getOutboxEvents();
+
+        assertEquals(1, events.size());
+        assertEquals("PaymentProcessed", events.get(0).getEventType());
     }
 }

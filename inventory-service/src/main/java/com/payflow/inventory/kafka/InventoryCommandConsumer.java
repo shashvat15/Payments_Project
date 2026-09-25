@@ -1,7 +1,6 @@
 package com.payflow.inventory.kafka;
 
 import com.payflow.inventory.command.InventoryCommand;
-import com.payflow.inventory.event.InventoryResultEvent;
 import com.payflow.inventory.service.InventoryService;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -14,11 +13,9 @@ public class InventoryCommandConsumer {
     private static final Logger log = LoggerFactory.getLogger(InventoryCommandConsumer.class);
 
     private final InventoryService inventoryService;
-    private final InventoryEventProducer inventoryEventProducer;
 
-    public InventoryCommandConsumer(InventoryService inventoryService, InventoryEventProducer inventoryEventProducer) {
+    public InventoryCommandConsumer(InventoryService inventoryService) {
         this.inventoryService = inventoryService;
-        this.inventoryEventProducer = inventoryEventProducer;
     }
 
     @KafkaListener(
@@ -31,10 +28,8 @@ public class InventoryCommandConsumer {
                 command.getProductId(), command.getQuantity());
 
         try {
-            InventoryResultEvent resultEvent;
-
             if ("RELEASE".equalsIgnoreCase(command.getCommandType())) {
-                resultEvent = inventoryService.releaseInventory(
+                inventoryService.releaseInventory(
                         command.getSagaId(),
                         command.getOrderId(),
                         command.getProductId(),
@@ -42,7 +37,7 @@ public class InventoryCommandConsumer {
                 );
             } else {
                 // Default to RESERVE
-                resultEvent = inventoryService.reserveInventory(
+                inventoryService.reserveInventory(
                         command.getSagaId(),
                         command.getOrderId(),
                         command.getProductId(),
@@ -51,9 +46,8 @@ public class InventoryCommandConsumer {
                 );
             }
 
-            inventoryEventProducer.sendInventoryResultEvent(resultEvent);
-            log.info("Processed InventoryCommand and published result: sagaId={}, status={}",
-                    command.getSagaId(), resultEvent.getStatus());
+            log.info("Processed InventoryCommand into inventory_db and outbox for sagaId={}, orderId={}",
+                    command.getSagaId(), command.getOrderId());
 
         } catch (Exception ex) {
             log.error("Error processing InventoryCommand [sagaId={}]: {}", command.getSagaId(), ex.getMessage(), ex);
